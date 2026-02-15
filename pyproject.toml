@@ -9,5 +9,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pyinstaller>=6.18.0",
+    "nuitka>=2.7.0",
+    "zstandard>=0.23.0",
+    "ruff>=0.13.0",
 ]

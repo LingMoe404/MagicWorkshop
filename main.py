@@ -10,22 +10,22 @@ import subprocess
 import json
 import configparser
 
-from PySide6.QtCore import Qt, QThread, Signal as pyqtSignal, QObject, QSize, QUrl, QPropertyAnimation, Property as pyqtProperty, QTimer
+from PySide6.QtCore import Qt, QThread, Signal, QSize, QUrl, QTimer
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
-                               QFileDialog, QFrame, QSpacerItem, QSizePolicy, QListWidgetItem, QAbstractItemView, QSplitter, QStyleOptionViewItem, QStyle)
-from PySide6.QtGui import QIcon, QColor, QDesktopServices, QPainter, QPainterPath, QPixmap, QGuiApplication
+                               QFileDialog, QFrame, QListWidgetItem, QAbstractItemView, QSplitter, QStyleOptionViewItem, QStyle)
+from PySide6.QtGui import QIcon, QColor, QDesktopServices, QGuiApplication
 
 # 引入 Fluent Widgets (Win11 风格组件)
 from qfluentwidgets import (FluentWindow, SubtitleLabel, StrongBodyLabel, BodyLabel, 
                             LineEdit, PrimaryPushButton, PushButton, ProgressBar, 
                             TextEdit, SwitchButton, ComboBox, CardWidget, InfoBar, 
-                            InfoBarPosition, setTheme, Theme, IconWidget, FluentIcon, setThemeColor, isDarkTheme, ImageLabel, MessageDialog,
+                            InfoBarPosition, setTheme, Theme, FluentIcon, setThemeColor, isDarkTheme, ImageLabel, MessageDialog,
                             ListWidget)
 from qfluentwidgets.components.widgets.list_view import ListItemDelegate
 
 
 class ClickableBodyLabel(BodyLabel):
-    clicked = pyqtSignal()
+    clicked = Signal()
 
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
@@ -58,8 +58,8 @@ class NoHighlightItemDelegate(ListItemDelegate):
 
 
 class DroppableBodyLabel(BodyLabel):
-    filesDropped = pyqtSignal(list)
-    dragActiveChanged = pyqtSignal(bool)
+    filesDropped = Signal(list)
+    dragActiveChanged = Signal(bool)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -94,8 +94,8 @@ class DroppableBodyLabel(BodyLabel):
 
 
 class DroppableListWidget(ListWidget):
-    filesDropped = pyqtSignal(list)
-    dragActiveChanged = pyqtSignal(bool)
+    filesDropped = Signal(list)
+    dragActiveChanged = Signal(bool)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -137,14 +137,7 @@ class DroppableListWidget(ListWidget):
 
 # --- 核心工具函数 ---
 def resource_path(relative_path):
-    """ 获取资源绝对路径：优先找打包内部资源，其次找 exe 同级目录 """
-    if hasattr(sys, '_MEIPASS'):
-        # 如果是打包状态，先检查临时目录(内部资源)
-        p = os.path.join(sys._MEIPASS, relative_path)
-        if os.path.exists(p):
-            return p
-    
-    # 开发环境或寻找外部文件时
+    """获取资源绝对路径：打包后取 exe 同级，开发环境取项目根目录。"""
     base_path = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
@@ -153,17 +146,22 @@ def tool_path(filename):
     return resource_path(os.path.join("tools", filename))
 
 def safe_decode(bytes_data):
-    if not bytes_data: return ""
-    try: return bytes_data.decode('utf-8').strip()
-    except:
-        try: return bytes_data.decode('gbk').strip()
-        except: return bytes_data.decode('utf-8', errors='ignore').strip()
+    if not bytes_data:
+        return ""
+
+    try:
+        return bytes_data.decode('utf-8').strip()
+    except UnicodeDecodeError:
+        try:
+            return bytes_data.decode('gbk').strip()
+        except UnicodeDecodeError:
+            return bytes_data.decode('utf-8', errors='ignore').strip()
 
 def time_str_to_seconds(time_str):
     try:
         h, m, s = time_str.split(':')
         return int(h) * 3600 + int(m) * 60 + float(s)
-    except:
+    except Exception:
         return 0.0
 
 def to_long_path(path):
@@ -181,10 +179,15 @@ DEFAULT_SETTINGS = {
     "preset": "4",
     "loudnorm": "loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000",
     "theme": "Auto",
-    "nv_aq": "True"
+    "nv_aq": "True",
+    "save_mode": "元素覆写 (Overwrite)",
+    "export_dir": ""
 }
 
 VIDEO_EXTS = ('.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.ts')
+SAVE_MODE_SAVE_AS = "开辟新世界 (Save As)"
+SAVE_MODE_OVERWRITE = "元素覆写 (Overwrite)"
+SAVE_MODE_REMAIN = "元素保留 (Remain)"
 
 def get_default_cache_dir():
     """ 获取默认缓存目录 (软件根目录/cache) """
@@ -199,11 +202,11 @@ def get_config_path():
 # --- 工作线程 (负责耗时的转码任务) ---
 class EncoderWorker(QThread):
     # 定义信号，用于通知 UI 更新
-    log_signal = pyqtSignal(str, str) # msg, level (info/success/error)
-    progress_total_signal = pyqtSignal(int)
-    progress_current_signal = pyqtSignal(int)
-    finished_signal = pyqtSignal()
-    ask_error_decision = pyqtSignal(str, str)
+    log_signal = Signal(str, str) # msg, level (info/success/error)
+    progress_total_signal = Signal(int)
+    progress_current_signal = Signal(int)
+    finished_signal = Signal()
+    ask_error_decision = Signal(str, str)
     
     def __init__(self, config):
         super().__init__()
@@ -220,7 +223,8 @@ class EncoderWorker(QThread):
                 subprocess.Popen(["taskkill", "/F", "/T", "/PID", str(self.current_proc.pid)], 
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
-            except: pass
+            except Exception:
+                pass
 
     def set_paused(self, paused):
         self.is_paused = paused
@@ -231,7 +235,8 @@ class EncoderWorker(QThread):
                 ctypes.windll.kernel32.SetThreadExecutionState(0x80000003)
             else:
                 ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
-        except: pass
+        except Exception:
+            pass
 
     def receive_decision(self, decision):
         self.decision = decision
@@ -243,16 +248,15 @@ class EncoderWorker(QThread):
         encoder_type = self.config.get('encoder', 'Intel QSV')
         export_dir = self.config['export_dir']
         cache_dir = self.config.get('cache_dir') or get_default_cache_dir()
+        save_mode = self.config.get('save_mode', SAVE_MODE_OVERWRITE)
         try:
             os.makedirs(cache_dir, exist_ok=True)
-        except:
+        except Exception:
             cache_dir = ""
-        overwrite = self.config['overwrite']
         preset = self.config['preset']
         target_vmaf = self.config['vmaf']
         audio_bitrate = self.config['audio_bitrate']
         loudnorm = self.config['loudnorm']
-        shutdown = self.config['shutdown']
 
         ffmpeg = tool_path("ffmpeg.exe")
         ffprobe = tool_path("ffprobe.exe")
@@ -280,7 +284,8 @@ class EncoderWorker(QThread):
             self.log_signal.emit(f"捕捉到 {total_tasks} 个待净化异变体！( •̀ ω •́ )y", "info")
 
             for i, filepath in enumerate(tasks):
-                if not self.is_running: break
+                if not self.is_running:
+                    break
 
                 fname = os.path.basename(filepath)
                 self.log_signal.emit(f"[{i+1}/{total_tasks}] 正在对 {fname} 展开固有结界...", "info")
@@ -293,10 +298,11 @@ class EncoderWorker(QThread):
                     cmd_probe = [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name", "-of", "default=noprint_wrappers=1:nokey=1", filepath]
                     raw_codec = subprocess.check_output(cmd_probe, creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
                     codec = safe_decode(raw_codec).lower()
-                    if "av1" in codec and fname.lower().endswith(".mkv"):
-                        self.log_signal.emit(f" -> 此物质已是纯净形态 (AV1)，跳过~ (Pass)", "success")
+                    if "av1" in codec:
+                        self.log_signal.emit(" -> 此物质已是纯净形态 (AV1)，跳过~ (Pass)", "success")
                         continue
-                except: pass
+                except Exception:
+                    pass
 
                 # 2. 获取时长
                 duration_sec = 0.0
@@ -304,14 +310,26 @@ class EncoderWorker(QThread):
                     cmd_dur = [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filepath]
                     out_dur = subprocess.check_output(cmd_dur, creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
                     duration_sec = float(safe_decode(out_dur))
-                except: pass
+                except Exception:
+                    pass
+
+                # 2.1 获取原始音轨声道数（避免固定转为双声道）
+                source_audio_channels = None
+                try:
+                    cmd_ach = [ffprobe, "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=channels", "-of", "default=noprint_wrappers=1:nokey=1", filepath]
+                    out_ach = subprocess.check_output(cmd_ach, creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+                    ach = int(safe_decode(out_ach))
+                    if ach > 0:
+                        source_audio_channels = ach
+                except Exception:
+                    pass
 
                 # 3. 准备编码器参数
                 def map_amd_preset(p):
                     # 将 1-7 的通用速度预设映射为 AMF 支持的预设
                     try:
                         p = int(p)
-                    except:
+                    except Exception:
                         p = 4
                     if p <= 2:
                         return "quality"
@@ -357,11 +375,13 @@ class EncoderWorker(QThread):
                             break
                         
                         while self.is_paused:
-                            if not self.is_running: break
+                            if not self.is_running:
+                                break
                             time.sleep(0.1)
 
                         line = self.current_proc.stdout.readline()
-                        if not line and self.current_proc.poll() is not None: break
+                        if not line and self.current_proc.poll() is not None:
+                            break
                         if line:
                             decoded = safe_decode(line)
                             ab_av1_log.append(decoded)
@@ -376,12 +396,16 @@ class EncoderWorker(QThread):
                                 search_success = True
                     self.current_proc.wait()
                     # 显式清理管道
-                    if self.current_proc.stdout: self.current_proc.stdout.close()
-                    if self.current_proc.stderr: self.current_proc.stderr.close()
+                    if self.current_proc.stdout:
+                        self.current_proc.stdout.close()
+                    if self.current_proc.stderr:
+                        self.current_proc.stderr.close()
 
-                except: pass
+                except Exception:
+                    pass
 
-                if not self.is_running: break
+                if not self.is_running:
+                    break
 
                 if search_success:
                     self.log_signal.emit(f" -> 术式解析完毕 (ICQ): {best_icq} (๑•̀ㅂ•́)و✧", "success")
@@ -390,7 +414,8 @@ class EncoderWorker(QThread):
                     # [Fix] 输出 ab-av1 的最后几行日志以便排查
                     if ab_av1_log:
                         self.log_signal.emit("    [ab-av1 错误回溯]:", "error")
-                        for l in ab_av1_log[-5:]: self.log_signal.emit(f"    {l}", "error")
+                        for log_line in ab_av1_log[-5:]:
+                            self.log_signal.emit(f"    {log_line}", "error")
 
                 # 4. FFmpeg 转码
                 base_name = os.path.splitext(fname)[0]
@@ -399,16 +424,26 @@ class EncoderWorker(QThread):
                 else:
                     temp_file = os.path.join(os.path.dirname(filepath), base_name + ".temp.mkv")
                 
-                if overwrite:
+                if save_mode == SAVE_MODE_OVERWRITE:
                     final_dest = os.path.join(os.path.dirname(filepath), base_name + ".mkv")
+                elif save_mode == SAVE_MODE_REMAIN:
+                    final_dest = os.path.join(os.path.dirname(filepath), base_name + "_opt.mkv")
                 else:
-                    if not os.path.exists(export_dir): os.makedirs(export_dir, exist_ok=True)
+                    if not export_dir:
+                        export_dir = os.path.dirname(filepath)
+                    if not os.path.exists(export_dir):
+                        os.makedirs(export_dir, exist_ok=True)
                     final_dest = os.path.join(export_dir, base_name + ".mkv")
 
                 # [Fix] MP4/MOV 容器中的 mov_text 字幕无法直接 copy 到 MKV，需转为 srt/subrip
                 sub_codec = "copy"
                 if fname.lower().endswith(('.mp4', '.mov', '.m4v')):
                     sub_codec = "subrip"
+
+                audio_args = ["-c:a", "libopus", "-b:a", audio_bitrate, "-ar", "48000"]
+                if source_audio_channels:
+                    audio_args.extend(["-ac", str(source_audio_channels)])
+                audio_args.extend(["-af", loudnorm])
 
                 # 构建 FFmpeg 命令
                 cmd = []
@@ -429,10 +464,8 @@ class EncoderWorker(QThread):
                     cmd.extend([
                         "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
                         "-pix_fmt", "p010le",
-                        
-                        "-c:a", "libopus", "-b:a", audio_bitrate,
-                        "-ar", "48000", "-ac", "2",
-                        "-af", loudnorm,
+
+                        *audio_args,
                         "-c:s", sub_codec,
 
                         "-map", "0:v:0", 
@@ -456,9 +489,7 @@ class EncoderWorker(QThread):
                         "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
                         "-pix_fmt", "p010le",
 
-                        "-c:a", "libopus", "-b:a", audio_bitrate,
-                        "-ar", "48000", "-ac", "2",
-                        "-af", loudnorm,
+                        *audio_args,
                         "-c:s", sub_codec,
 
                         "-map", "0:v:0",
@@ -478,10 +509,8 @@ class EncoderWorker(QThread):
                         "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", # 确保分辨率为偶数，防止 QSV 报错
                         "-pix_fmt", "p010le",
                         "-async_depth", "1", # 修复显存溢出/Invalid FrameType
-                        
-                        "-c:a", "libopus", "-b:a", audio_bitrate,
-                        "-ar", "48000", "-ac", "2",
-                        "-af", loudnorm,
+
+                        *audio_args,
                         "-c:s", sub_codec,
 
                         "-map", "0:v:0", 
@@ -500,11 +529,13 @@ class EncoderWorker(QThread):
                             break
                         
                         while self.is_paused:
-                            if not self.is_running: break
+                            if not self.is_running:
+                                break
                             time.sleep(0.1)
 
                         line = self.current_proc.stdout.readline()
-                        if not line and self.current_proc.poll() is not None: break
+                        if not line and self.current_proc.poll() is not None:
+                            break
                         if line:
                             d = safe_decode(line)
                             if "time=" in d and duration_sec > 0:
@@ -516,16 +547,20 @@ class EncoderWorker(QThread):
                             
                             if "frame=" not in d:
                                 err_log.append(d)
-                                if len(err_log) > 20: err_log.pop(0)
+                                if len(err_log) > 20:
+                                    err_log.pop(0)
                     
                     self.current_proc.wait()
                     # [Fix] 显式关闭管道，释放句柄
-                    if self.current_proc.stdout: self.current_proc.stdout.close()
-                    if self.current_proc.stderr: self.current_proc.stderr.close()
+                    if self.current_proc.stdout:
+                        self.current_proc.stdout.close()
+                    if self.current_proc.stderr:
+                        self.current_proc.stderr.close()
 
                     if not self.is_running:
                         lp_temp = to_long_path(temp_file)
-                        if os.path.exists(lp_temp): os.remove(lp_temp)
+                        if os.path.exists(lp_temp):
+                            os.remove(lp_temp)
                         break
 
                     lp_temp = to_long_path(temp_file)
@@ -536,16 +571,18 @@ class EncoderWorker(QThread):
                             abs_dest = os.path.normcase(os.path.abspath(final_dest))
                             lp_src = to_long_path(filepath)
                             
-                            if overwrite:
+                            if save_mode == SAVE_MODE_OVERWRITE:
                                 # [优化] 安全覆盖逻辑：先尝试移动，成功后再处理原文件
                                 if abs_src == abs_dest:
                                     # 如果路径完全一致，先重命名原文件作为备份，防止 move 失败
                                     bak_path = lp_src + ".bak"
                                     os.replace(lp_src, bak_path)
                                     shutil.move(lp_temp, lp_dest)
-                                    if os.path.exists(bak_path): os.remove(bak_path)
+                                    if os.path.exists(bak_path):
+                                        os.remove(bak_path)
                                 else:
-                                    if os.path.exists(lp_dest): os.remove(lp_dest)
+                                    if os.path.exists(lp_dest):
+                                        os.remove(lp_dest)
                                     shutil.move(lp_temp, lp_dest)
                                 
                                 # 只有当源文件和目标文件不同时(例如 mp4 -> mkv)，才删除源文件
@@ -554,16 +591,22 @@ class EncoderWorker(QThread):
                                     
                                 self.log_signal.emit(" -> 净化完成！旧世界已被重写 (Overwrite) (ﾉ>ω<)ﾉ", "success")
                             else:
-                                if os.path.exists(lp_dest): os.remove(lp_dest)
+                                if os.path.exists(lp_dest):
+                                    os.remove(lp_dest)
                                 shutil.move(lp_temp, lp_dest)
-                                self.log_signal.emit(" -> 净化完成！新世界已确立 (Export) (ﾉ>ω<)ﾉ", "success")
+                                if save_mode == SAVE_MODE_REMAIN:
+                                    self.log_signal.emit(" -> 净化完成！元素已保留，优化体已生成 (Remain) (ﾉ>ω<)ﾉ", "success")
+                                else:
+                                    self.log_signal.emit(" -> 净化完成！新世界已确立 (Save As) (ﾉ>ω<)ﾉ", "success")
                         except Exception as e:
                             self.log_signal.emit(f" -> 封印仪式失败: {e} (T_T)", "error")
                     else:
                         self.log_signal.emit(" -> 术式失控 (Crash)... (T_T)", "error")
-                        for l in err_log: self.log_signal.emit(f"   {l}", "error")
+                        for err_line in err_log:
+                            self.log_signal.emit(f"   {err_line}", "error")
                         lp_temp = to_long_path(temp_file)
-                        if os.path.exists(lp_temp): os.remove(lp_temp)
+                        if os.path.exists(lp_temp):
+                            os.remove(lp_temp)
                         
                         # 遇到错误时询问用户
                         if self.is_running:
@@ -587,9 +630,6 @@ class EncoderWorker(QThread):
                 self.log_signal.emit(">>> 奇迹达成！(๑•̀ㅂ•́)و✧", "success")
                 self.progress_total_signal.emit(100)
                 self.progress_current_signal.emit(100)
-                if shutdown:
-                    self.log_signal.emit(">>> 60秒后强制进入休眠结界... (Sleep)", "error")
-                    os.system("shutdown /s /t 60")
             else:
                 self.log_signal.emit(">>> 契约被强制切断。", "error")
 
@@ -601,7 +641,7 @@ class EncoderWorker(QThread):
 
 # --- 异步分析线程 (防止界面卡死) ---
 class AnalysisWorker(QThread):
-    report_signal = pyqtSignal(str)
+    report_signal = Signal(str)
 
     def __init__(self, filepath):
         super().__init__()
@@ -629,7 +669,7 @@ class AnalysisWorker(QThread):
             
             # 1. 容器信息
             fmt = data.get('format', {})
-            report.append(f"📦 容器形态 (Container)")
+            report.append("📦 容器形态 (Container)")
             report.append(f"   • 真名 (Format): {fmt.get('format_long_name', 'Unknown')}")
             report.append(f"   • 质量 (Size):   {int(fmt.get('size', 0))/1024/1024:.2f} MB")
             report.append(f"   • 观测时长 (Duration): {float(fmt.get('duration', 0)):.2f} s")
@@ -877,12 +917,14 @@ class MainWindow(FluentWindow):
         self.worker = None
         self.selected_files = []
         self._drag_over_source_zone = False
+        self._auto_save_blocked = False
         
         # 初始化 UI
         self.init_ui()
         self.apply_min_window_size()
         self.load_settings_to_ui()
         self.combo_encoder.currentIndexChanged.connect(self.on_encoder_changed)
+        self.bind_auto_save_signals()
         
         # 欢迎语
         kaomojis = ["(｡•̀ᴗ-)✧", "(*/ω＼*)", "ヽ(✿ﾟ▽ﾟ)ノ", "(๑•̀ㅂ•́)و✧"]
@@ -922,12 +964,20 @@ class MainWindow(FluentWindow):
         theme_block = QVBoxLayout()
         theme_block.setSpacing(4)
         theme_block.addWidget(StrongBodyLabel("世界线风格 (Theme)", self))
+        theme_actions = QHBoxLayout()
+        theme_actions.setSpacing(8)
         self.combo_theme = ComboBox(self)
         self.combo_theme.addItems(["世界线收束 (Auto)", "光之加护 (Light)", "深渊凝视 (Dark)"])
         self.combo_theme.currentIndexChanged.connect(self.on_theme_changed)
         self.combo_theme.setFixedWidth(240)
         self.combo_theme.setMinimumHeight(34)
-        theme_block.addWidget(self.combo_theme)
+        theme_actions.addWidget(self.combo_theme)
+
+        self.btn_reset_conf = PushButton("↩️ 记忆回溯", self)
+        self.btn_reset_conf.setMinimumHeight(34)
+        self.btn_reset_conf.clicked.connect(self.restore_defaults)
+        theme_actions.addWidget(self.btn_reset_conf)
+        theme_block.addLayout(theme_actions)
         header_row.addLayout(theme_block)
 
         self.main_layout.addLayout(header_row)
@@ -964,16 +1014,16 @@ class MainWindow(FluentWindow):
         h2 = QHBoxLayout()
         self.line_cache = LineEdit(self.card_io)
         self.line_cache.setPlaceholderText("ab-av1 临时文件存放处...")
-        self.line_cache.setMinimumHeight(36)
+        self.line_cache.setFixedHeight(36)
         self.line_cache.setText(get_default_cache_dir())
         self.btn_cache = PushButton("浏览", self.card_io)
-        self.btn_cache.setMinimumHeight(36)
+        self.btn_cache.setFixedHeight(36)
         self.btn_cache.clicked.connect(lambda: self.browse_folder(self.line_cache))
         h2.addWidget(self.line_cache)
         h2.addWidget(self.btn_cache)
         
         self.btn_clear_cache = PushButton("🧹 净化残渣", self.card_io)
-        self.btn_clear_cache.setMinimumHeight(36)
+        self.btn_clear_cache.setFixedHeight(36)
         self.btn_clear_cache.clicked.connect(self.clear_cache_files)
         h2.addWidget(self.btn_clear_cache)
         
@@ -1044,21 +1094,6 @@ class MainWindow(FluentWindow):
         row2.addLayout(v7, 1)
         set_layout.addLayout(row2)
 
-        # 保存/恢复按钮
-        h_btns = QHBoxLayout()
-        self.btn_save_conf = PushButton("💾 铭刻记忆 (Save)", self.card_settings)
-        self.btn_save_conf.setMinimumHeight(36)
-        self.btn_save_conf.clicked.connect(self.save_current_settings)
-        
-        self.btn_reset_conf = PushButton("↩️ 记忆回溯 (Reset)", self.card_settings)
-        self.btn_reset_conf.setMinimumHeight(36)
-        self.btn_reset_conf.clicked.connect(self.restore_defaults)
-        
-        h_btns.addWidget(self.btn_save_conf)
-        h_btns.addWidget(self.btn_reset_conf)
-        h_btns.addStretch(1)
-        set_layout.addLayout(h_btns)
-
         left_column.addWidget(self.card_settings)
 
         # --- 选项与操作卡片 ---
@@ -1066,38 +1101,35 @@ class MainWindow(FluentWindow):
         act_layout = QVBoxLayout(self.card_action)
         act_layout.setContentsMargins(18, 16, 18, 16)
         act_layout.setSpacing(12)
-        
-        # 开关组
-        sw_layout = QHBoxLayout()
-        self.sw_save_as = SwitchButton("开辟新世界 (Save As)", self.card_action)
-        self.sw_save_as.setOnText("开辟新世界 (Save As)")
-        self.sw_save_as.setOffText("开辟新世界 (Save As)")
-        self.sw_save_as.setChecked(False)
-        self.sw_save_as.checkedChanged.connect(self.toggle_export_ui)
-        
-        self.sw_shutdown = SwitchButton("仪式后强制休眠 (Shutdown)", self.card_action)
-        self.sw_shutdown.setOnText("仪式后强制休眠 (Shutdown)")
-        self.sw_shutdown.setOffText("仪式后强制休眠 (Shutdown)")
-        
-        sw_layout.addWidget(self.sw_save_as)
-        sw_layout.addSpacing(20)
-        sw_layout.addWidget(self.sw_shutdown)
-        sw_layout.addStretch(1)
-        act_layout.addLayout(sw_layout)
 
-        # 导出路径 (当不覆盖时显示)
-        self.export_container = QWidget()
+        # 保存模式 + 导出路径（与操作按钮同卡片）
+        mode_layout = QVBoxLayout()
+        mode_layout.setContentsMargins(0, 0, 0, 0)
+        mode_layout.setSpacing(6)
+        mode_layout.addWidget(StrongBodyLabel("保存模式 (Save Mode)", self.card_action))
+        self.combo_save_mode = ComboBox(self.card_action)
+        self.combo_save_mode.addItems([SAVE_MODE_SAVE_AS, SAVE_MODE_OVERWRITE, SAVE_MODE_REMAIN])
+        self.combo_save_mode.setMinimumHeight(36)
+        self.combo_save_mode.currentIndexChanged.connect(self.toggle_export_ui)
+        mode_layout.addWidget(self.combo_save_mode)
+
+        self.export_container = QWidget(self.card_action)
         exp_layout = QHBoxLayout(self.export_container)
-        exp_layout.setContentsMargins(0, 5, 0, 0)
+        exp_layout.setContentsMargins(0, 0, 0, 0)
+        exp_layout.setSpacing(10)
         self.line_export = LineEdit(self.export_container)
         self.line_export.setPlaceholderText("新世界坐标...")
-        self.line_export.setMinimumHeight(36)
+        self.line_export.setFixedHeight(36)
         self.btn_export = PushButton("选择", self.export_container)
-        self.btn_export.setMinimumHeight(36)
+        self.btn_export.setFixedHeight(36)
+        self.btn_export.setFixedWidth(84)
         self.btn_export.clicked.connect(lambda: self.browse_folder(self.line_export))
         exp_layout.addWidget(self.line_export)
         exp_layout.addWidget(self.btn_export)
-        act_layout.addWidget(self.export_container)
+        mode_layout.addWidget(self.export_container)
+        act_layout.addLayout(mode_layout)
+        # 弹性空间放在保存模式与按钮组之间，保证按钮固定贴底
+        act_layout.addStretch(1)
         self.toggle_export_ui() # 初始化状态
 
         # 按钮组
@@ -1105,17 +1137,20 @@ class MainWindow(FluentWindow):
         btn_layout.setSpacing(10)
         self.btn_start = PrimaryPushButton("✨ 缔结契约 (Start)", self.card_action)
         self.btn_start.clicked.connect(self.start_task)
-        self.btn_start.setMinimumHeight(42)
+        self.btn_start.setMinimumHeight(36)
+        self.btn_start.setMaximumHeight(36)
         
         self.btn_pause = PushButton("⏳ 时空冻结 (Pause)", self.card_action)
         self.btn_pause.clicked.connect(self.pause_task)
         self.btn_pause.setEnabled(False)
-        self.btn_pause.setMinimumHeight(42)
+        self.btn_pause.setMinimumHeight(36)
+        self.btn_pause.setMaximumHeight(36)
         
         self.btn_stop = PushButton(" 契约破弃 (Stop)", self.card_action)
         self.btn_stop.clicked.connect(self.stop_task)
         self.btn_stop.setEnabled(False)
-        self.btn_stop.setMinimumHeight(42)
+        self.btn_stop.setMinimumHeight(36)
+        self.btn_stop.setMaximumHeight(36)
         # 设置停止按钮为红色样式 (自定义QSS)
         self.btn_stop.setStyleSheet("PushButton { color: #D93652; font-weight: bold; } PushButton:disabled { color: #CCCCCC; }")
 
@@ -1190,6 +1225,7 @@ class MainWindow(FluentWindow):
         self.update_selected_count()
 
         right_column.addWidget(self.card_selected_files)
+        self.sync_settings_selected_card_height()
         right_column.addStretch(1)
 
         self.column_splitter.addWidget(self.left_panel)
@@ -1249,12 +1285,14 @@ class MainWindow(FluentWindow):
             QTimer.singleShot(0, self.center_on_screen)
         QTimer.singleShot(0, self.equalize_columns)
         QTimer.singleShot(0, self.sync_source_cache_card_height)
+        QTimer.singleShot(0, self.sync_settings_selected_card_height)
         QTimer.singleShot(0, self.update_selected_zone_border)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.equalize_columns()
         self.sync_source_cache_card_height()
+        self.sync_settings_selected_card_height()
 
     def equalize_columns(self):
         if hasattr(self, "column_splitter") and self.column_splitter:
@@ -1267,6 +1305,50 @@ class MainWindow(FluentWindow):
             target = max(self.card_io.minimumSizeHint().height(), self.card_source.minimumSizeHint().height())
             self.card_io.setFixedHeight(target)
             self.card_source.setFixedHeight(target)
+
+    def sync_settings_selected_card_height(self):
+        if not (hasattr(self, "card_settings") and hasattr(self, "card_action") and hasattr(self, "card_selected_files")):
+            return
+
+        settings_min = self.card_settings.minimumSizeHint().height()
+        action_min = self.card_action.minimumSizeHint().height()
+        if settings_min <= 0 or action_min <= 0:
+            return
+
+        # 使用当前可见内容的建议高度进行比例分配（保存模式切换后会变化）
+        settings_pref = max(settings_min, self.card_settings.sizeHint().height())
+        action_pref = max(action_min, self.card_action.sizeHint().height())
+        mode_text = self.combo_save_mode.currentText() if hasattr(self, "combo_save_mode") else SAVE_MODE_SAVE_AS
+        # 元素覆写/元素保留模式下，操作卡片更紧凑一点
+        if mode_text != SAVE_MODE_SAVE_AS:
+            action_pref = max(action_min, int(action_pref * 0.48))
+
+        left_layout = self.left_panel.layout() if hasattr(self, "left_panel") else None
+        gap = left_layout.spacing() if left_layout is not None else 12
+        if gap < 0:
+            gap = 12
+
+        right_h = max(self.card_selected_files.height(), self.card_selected_files.minimumSizeHint().height())
+        available = max(0, right_h - gap)
+
+        pref_sum = max(1, settings_pref + action_pref)
+        action_h = int(round(available * (action_pref / pref_sum)))
+        settings_h = available - action_h
+
+        if settings_h < settings_min:
+            settings_h = settings_min
+            action_h = available - settings_h
+        if action_h < action_min:
+            action_h = action_min
+            settings_h = available - action_h
+
+        # 极端情况下（总可用高度小于两卡片最小总和）尽量回退到可显示状态
+        if settings_h < settings_min or action_h < action_min:
+            settings_h = settings_min
+            action_h = action_min
+
+        self.card_settings.setFixedHeight(settings_h)
+        self.card_action.setFixedHeight(action_h)
 
     def center_on_screen(self):
         screen = self.windowHandle().screen() if self.windowHandle() else QGuiApplication.primaryScreen()
@@ -1294,7 +1376,10 @@ class MainWindow(FluentWindow):
                     data["loudnorm"] = sect.get("loudnorm", DEFAULT_SETTINGS["loudnorm"])
                     data["theme"] = sect.get("theme", DEFAULT_SETTINGS["theme"])
                     data["nv_aq"] = sect.get("nv_aq", DEFAULT_SETTINGS["nv_aq"])
-            except: pass
+                    data["save_mode"] = sect.get("save_mode", DEFAULT_SETTINGS["save_mode"])
+                    data["export_dir"] = sect.get("export_dir", DEFAULT_SETTINGS["export_dir"])
+            except Exception:
+                pass
         else:
             self.save_settings_file(DEFAULT_SETTINGS)
         
@@ -1305,8 +1390,10 @@ class MainWindow(FluentWindow):
         
         # 设置 Encoder
         enc_idx = 0
-        if "NVIDIA" in data["encoder"]: enc_idx = 1
-        elif "AMD" in data["encoder"]: enc_idx = 2
+        if "NVIDIA" in data["encoder"]:
+            enc_idx = 1
+        elif "AMD" in data["encoder"]:
+            enc_idx = 2
         self.combo_encoder.setCurrentIndex(enc_idx)
         
         # 设置 ComboBox
@@ -1315,13 +1402,26 @@ class MainWindow(FluentWindow):
             if self.combo_preset.itemText(i) == data["preset"]:
                 idx = i
                 break
-        if idx >= 0: self.combo_preset.setCurrentIndex(idx)
-        else: self.combo_preset.setCurrentIndex(3) # Default 4
+        if idx >= 0:
+            self.combo_preset.setCurrentIndex(idx)
+        else:
+            self.combo_preset.setCurrentIndex(3)  # Default 4
         
         # 设置主题
         theme_map = {"Auto": 0, "Light": 1, "Dark": 2}
         self.combo_theme.setCurrentIndex(theme_map.get(data["theme"], 0))
         self.on_theme_changed(self.combo_theme.currentIndex()) # 确保应用
+
+        # 设置保存模式 + 导出目录
+        mode_map = {
+            SAVE_MODE_SAVE_AS: 0,
+            SAVE_MODE_OVERWRITE: 1,
+            SAVE_MODE_REMAIN: 2
+        }
+        default_mode_idx = mode_map.get(DEFAULT_SETTINGS["save_mode"], 1)
+        self.combo_save_mode.setCurrentIndex(mode_map.get(data["save_mode"], default_mode_idx))
+        self.line_export.setText(data.get("export_dir", ""))
+        self.toggle_export_ui()
 
     def on_encoder_changed(self, index):
         is_nv = (index == 1)
@@ -1336,13 +1436,29 @@ class MainWindow(FluentWindow):
                 self.line_vmaf.setText("93.0")
             self.sw_nv_aq.setEnabled(False)
 
+    def bind_auto_save_signals(self):
+        self.combo_encoder.currentIndexChanged.connect(lambda _: self.auto_save_settings())
+        self.combo_preset.currentIndexChanged.connect(lambda _: self.auto_save_settings())
+        self.combo_theme.currentIndexChanged.connect(lambda _: self.auto_save_settings())
+        self.combo_save_mode.currentIndexChanged.connect(lambda _: self.auto_save_settings())
+        self.sw_nv_aq.checkedChanged.connect(lambda _: self.auto_save_settings())
+        self.line_vmaf.textChanged.connect(lambda _: self.auto_save_settings())
+        self.line_audio.textChanged.connect(lambda _: self.auto_save_settings())
+        self.line_loudnorm.textChanged.connect(lambda _: self.auto_save_settings())
+        self.line_export.textChanged.connect(lambda _: self.auto_save_settings())
+
+    def auto_save_settings(self):
+        if self._auto_save_blocked:
+            return
+        self.save_current_settings(show_tip=False)
+
     def save_settings_file(self, settings_dict):
         config = configparser.ConfigParser()
         config["Settings"] = settings_dict
         with open(get_config_path(), 'w', encoding='utf-8') as f:
             config.write(f)
 
-    def save_current_settings(self):
+    def save_current_settings(self, show_tip=False):
         settings = {
             "encoder": self.combo_encoder.currentText(),
             "vmaf": self.line_vmaf.text(),
@@ -1350,12 +1466,16 @@ class MainWindow(FluentWindow):
             "preset": self.combo_preset.text(),
             "loudnorm": self.line_loudnorm.text(),
             "theme": ["Auto", "Light", "Dark"][self.combo_theme.currentIndex()],
-            "nv_aq": str(self.sw_nv_aq.isChecked())
+            "nv_aq": str(self.sw_nv_aq.isChecked()),
+            "save_mode": self.combo_save_mode.currentText(),
+            "export_dir": self.line_export.text().strip()
         }
         self.save_settings_file(settings)
-        InfoBar.success("记忆已铭刻", "当前术式参数已写入 config.ini", parent=self, position=InfoBarPosition.TOP)
+        if show_tip:
+            InfoBar.success("已自动保存", "当前术式参数已写入 config.ini", parent=self, position=InfoBarPosition.TOP)
 
     def restore_defaults(self):
+        self._auto_save_blocked = True
         self.combo_encoder.setCurrentIndex(0) # Intel QSV
         self.line_vmaf.setText(DEFAULT_SETTINGS["vmaf"])
         self.line_audio.setText(DEFAULT_SETTINGS["audio_bitrate"])
@@ -1367,12 +1487,22 @@ class MainWindow(FluentWindow):
             if self.combo_preset.itemText(i) == DEFAULT_SETTINGS["preset"]:
                 idx = i
                 break
-        if idx >= 0: self.combo_preset.setCurrentIndex(idx)
+        if idx >= 0:
+            self.combo_preset.setCurrentIndex(idx)
         
         self.combo_theme.setCurrentIndex(0) # Auto
-        
-        self.save_current_settings()
+        self.combo_save_mode.setCurrentIndex(1) # Overwrite
+        self.line_export.clear()
+        self.toggle_export_ui()
+        self._auto_save_blocked = False
+
+        self.save_current_settings(show_tip=False)
         InfoBar.info("记忆回溯成功", "参数已重置为初始形态", parent=self, position=InfoBarPosition.TOP)
+        if self.worker and self.worker.isRunning():
+            InfoBar.warning("魔力核心重检已跳过", "当前正在进行炼成，停止任务后再执行记忆回溯可触发自检。", parent=self, position=InfoBarPosition.TOP)
+        else:
+            self.log(">>> 正在重新校准魔力核心可用性...", "info")
+            QTimer.singleShot(0, self.check_dependencies)
 
     def on_theme_changed(self, index):
         if index == 0:
@@ -1401,7 +1531,7 @@ class MainWindow(FluentWindow):
             p = os.path.normpath(raw)
 
             if os.path.isdir(p):
-                for dp, dn, filenames in os.walk(p):
+                for dp, _, filenames in os.walk(p):
                     for f in filenames:
                         fp = os.path.join(dp, f)
                         if fp.lower().endswith(VIDEO_EXTS) and fp not in existing:
@@ -1572,13 +1702,16 @@ class MainWindow(FluentWindow):
             self.clear_selected_list_visual_state()
 
     def toggle_export_ui(self):
-        is_save_as = self.sw_save_as.isChecked()
+        mode_text = self.combo_save_mode.currentText()
+        is_save_as = (mode_text == SAVE_MODE_SAVE_AS)
         self.export_container.setVisible(is_save_as)
-        
-        # 当关闭选项且窗口可见时，尝试收缩窗口高度以适应内容
-        if not is_save_as and self.isVisible():
-            QApplication.processEvents()
-            self.resize(self.width(), 1)
+        # 仅刷新布局，避免强制 resize 在无边框窗口下触发异常
+        self.export_container.updateGeometry()
+        if self.card_action.layout():
+            self.card_action.layout().activate()
+        self.card_action.updateGeometry()
+        self.sync_settings_selected_card_height()
+        QTimer.singleShot(0, self.sync_settings_selected_card_height)
 
     def log(self, msg, level="info"):
         timestamp = time.strftime('%H:%M:%S')
@@ -1588,10 +1721,14 @@ class MainWindow(FluentWindow):
         # 优化深色模式下的颜色对比度
         ts_color = "#AAAAAA" if is_dark else "#888888"
         color = "#FFFFFF" if is_dark else "#000000"
-        if level == "error": color = "#FF4E6A" if is_dark else "#C00000"
-        elif level == "warning": color = "#FFC857" if is_dark else "#B36B00"
-        elif level == "success": color = "#55E555" if is_dark else "#008800"
-        elif level == "info": color = ts_color if is_dark else "#444444"
+        if level == "error":
+            color = "#FF4E6A" if is_dark else "#C00000"
+        elif level == "warning":
+            color = "#FFC857" if is_dark else "#B36B00"
+        elif level == "success":
+            color = "#55E555" if is_dark else "#008800"
+        elif level == "info":
+            color = ts_color if is_dark else "#444444"
         
         html = f'<span style="color:{ts_color}">[{timestamp}]</span> <span style="color:{color}">{msg}</span>'
         self.text_log.append(html)
@@ -1621,6 +1758,12 @@ class MainWindow(FluentWindow):
             InfoBar.warning(title="提示", content="请先选择视频源文件夹或视频文件！", orient=Qt.Orientation.Horizontal, isClosable=True, position=InfoBarPosition.TOP, parent=self)
             return
 
+        save_mode = self.combo_save_mode.currentText()
+        export_dir = self.line_export.text().strip()
+        if save_mode == SAVE_MODE_SAVE_AS and not export_dir:
+            InfoBar.warning("缺少导出目录", "当前是“开辟新世界 (Save As)”模式，请先选择导出文件夹。", parent=self, position=InfoBarPosition.TOP)
+            return
+
         # 参数校验
         try:
             vmaf_val = float(self.line_vmaf.text())
@@ -1631,14 +1774,13 @@ class MainWindow(FluentWindow):
         config = {
             'selected_files': self.selected_files[:],
             'encoder': self.combo_encoder.currentText(),
-            'export_dir': self.line_export.text(),
+            'export_dir': export_dir,
+            'save_mode': save_mode,
             'cache_dir': self.line_cache.text().strip() or get_default_cache_dir(),
-            'overwrite': not self.sw_save_as.isChecked(), # 如果未开启"另存为"，则默认为覆盖
             'preset': self.combo_preset.text(),
             'vmaf': vmaf_val,
             'audio_bitrate': self.line_audio.text(),
             'loudnorm': self.line_loudnorm.text(),
-            'shutdown': self.sw_shutdown.isChecked(),
             'nv_aq': self.sw_nv_aq.isChecked()
         }
         os.makedirs(config['cache_dir'], exist_ok=True)
@@ -1656,6 +1798,7 @@ class MainWindow(FluentWindow):
         self.btn_start.setText("✨ 奇迹发生中...")
         self.btn_pause.setEnabled(True)
         self.combo_encoder.setEnabled(False) # 运行中禁止切换后端
+        self.combo_save_mode.setEnabled(False) # 运行中禁止切换保存模式
         self.btn_pause.setText("⏳ 时空冻结 (Pause)")
         self.btn_stop.setEnabled(True)
         self.pbar_total.setValue(0)
@@ -1712,6 +1855,7 @@ class MainWindow(FluentWindow):
         self.btn_pause.setEnabled(False)
         self.btn_stop.setEnabled(False)
         self.combo_encoder.setEnabled(True)
+        self.combo_save_mode.setEnabled(True)
         self.worker = None
 
     def apply_encoder_availability(self, has_qsv, has_nvenc, has_amf):
@@ -1844,7 +1988,7 @@ class MainWindow(FluentWindow):
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0
                                 )
-                                _, stderr_hevc = proc_hevc.communicate()
+                                proc_hevc.communicate()
                                 if proc_hevc.returncode == 0:
                                     self.log(">>> 提示: 检测到 NVIDIA 显卡，但该型号不支持 AV1 硬件编码 (需 RTX 40 系列)。", "warning")
                                 else:
@@ -1887,9 +2031,12 @@ class MainWindow(FluentWindow):
                     InfoBar.warning("硬件不支持", "您的显卡似乎不支持 AV1 硬件编码，或者驱动未正确安装。", parent=self, position=InfoBarPosition.TOP)
                 else:
                     msg = ">>> 适格者认证通过："
-                    if has_qsv: msg += " [Intel QSV]"
-                    if has_nvenc: msg += " [NVIDIA NVENC]"
-                    if has_amf: msg += " [AMD AMF]"
+                    if has_qsv:
+                        msg += " [Intel QSV]"
+                    if has_nvenc:
+                        msg += " [NVIDIA NVENC]"
+                    if has_amf:
+                        msg += " [AMD AMF]"
                     self.log(msg + " (Ready)", "success")
                     if switched_to:
                         self.log(f">>> 已自动切换至 {switched_to} 术式。", "info")
@@ -1910,7 +2057,7 @@ if __name__ == '__main__':
     # 设置 AppUserModelID，将程序与 Python 解释器区分开，确保任务栏图标清晰且独立
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("LingMoe404.MagicWorkshop.Encoder.v1")
-    except:
+    except Exception:
         pass
 
     # 启用高分屏支持
