@@ -8,8 +8,8 @@
 
 | 版本 | 支持状态 |
 | :--- | :--- |
-| v1.1.x | :white_check_mark: |
-| v1.0.x | :x: |
+| v1.2.x | :white_check_mark: |
+| v1.1.x | :x: |
 | < 1.0 | :x: |
 
 ## 报告漏洞 (Reporting a Vulnerability)
