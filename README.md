@@ -1,6 +1,6 @@
 # ✨ 魔法少女工坊 (Magic Workshop) - NAS Edition
 
-![Version](https://img.shields.io/badge/version-1.2.0-FB7299?style=for-the-badge&logo=bilibili&logoColor=white)
+![Version](https://img.shields.io/badge/version-1.2.1-FB7299?style=for-the-badge&logo=bilibili&logoColor=white)
 ![Built with Gemini](https://img.shields.io/badge/Built%20with-Gemini-8E75B2?style=for-the-badge&logo=googlegemini&logoColor=white)
 ![Platform](https://img.shields.io/badge/OS-Windows11-0078D6?style=for-the-badge&logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/License-GPLv3-green?style=for-the-badge)
@@ -24,7 +24,7 @@
     *   **Intel QSV**: 专为 Intel Arc (A380/A750/B580) 及 Core Ultra 核显优化，满血释放 `av1_qsv` 性能。
     *   **NVIDIA NVENC**: 支持 RTX 40 系列显卡 AV1 编码，内置 **AQ (感知画质增强)** 开关，画质更细腻。
     *   **AMD AMF**: **[New]** 新增对 Radeon RX 7000 系列显卡及 RDNA 3 架构核显 (如 Ryzen 8000G) AV1 编码支持。
-*   **🧠 智能码率 (ab-av1)**: 集成 `ab-av1` 算法，根据设定的 VMAF 分数（Intel 默认 93 / NVIDIA 默认 95 / AMD 默认 97）自动测算最佳压制参数，支持 **10-bit** 深度。
+ *   **🧠 智能码率 (ab-av1)**: 集成 `ab-av1` 算法，根据设定的 VMAF 分数（全平台默认 93）自动测算最佳压制参数，支持 **10-bit** 深度 (AMD 暂限 8-bit)。
 *   **📂 批量洗版**: 支持选择整个文件夹，自动扫描视频文件并加入队列。支持断点续传，适合挂机处理 TB 级数据。
 *   **🔮 真理之眼**: 拖入视频文件即可快速查看详细媒体信息（编码、流信息、码率等），二次元风格报告。
 *   **🛠️ 媒体库友好**:
@@ -39,12 +39,13 @@
 | 特性 / 参数 | Intel QSV (默认) | NVIDIA NVENC | AMD AMF |
 | :--- | :--- | :--- | :--- |
 | **FFmpeg 编码器** | `av1_qsv` | `av1_nvenc` | `av1_amf` |
-| **默认 VMAF 目标** | `93.0` | `95.0` | `97.0` |
-| **质量控制参数** | `-global_quality:v` | `-cq` | `-qp_p` |
+| **默认 VMAF 目标** | `93.0` | `93.0` | `93.0` |
+| **默认灵力偏移** | `-2` | `-4` | `-6` |
+| **质量控制参数** | `-global_quality:v` | `-cq` | `-qvbr_quality_level` |
 | **速度预设 (Preset)** | `1` (慢) - `7` (快) | `p7` (慢) - `p1` (快) | `quality` (慢) - `speed` (快) |
-| **码率控制模式** | 硬件 ICQ 模式 | `vbr` + `-b:v 0` | `cqp` 模式 |
+| **码率控制模式** | 硬件 ICQ 模式 | `vbr` + `-b:v 0` | `vbr_latency` + QVBR |
 | **感知增强 (AQ)** | 默认启用 (Lookahead) | 默认启用 (Spatial/Temporal) | 默认启用 (Pre-Analysis) |
-| **像素格式** | `p010le` (10-bit) | `p010le` (10-bit) | `p010le` (10-bit) |
+ | **像素格式** | `p010le` (10-bit) | `p010le` (10-bit) | `yuv420p` (8-bit) |
 | **特殊优化** | `-async_depth 1` (防溢出) | 解除码率限制 (`-b:v 0`) | 启用 VBAQ 自适应量化 |
 | **硬件门槛** | Intel Arc / Core Ultra | NVIDIA RTX 40 系列 | AMD RX 7000 / RDNA 3 |
 
@@ -58,7 +59,7 @@
 *   **VMAF 93 (推荐平衡)**: **默认设置**。肉眼无损的黄金分割点，体积缩减可达 40-60%。
 *   **VMAF 90 (高压缩比)**: 适合在平板或手机上观看，在保持良好观感的前提下极大节省空间。
 *   **VMAF < 85**: 可能会出现可见的压缩伪影，不建议用于长期收藏。
-*   （不同编码器适合的 VMAF 参数不一致，Intel 建议 93，NVIDIA 建议 95，AMD 建议 97）
+*   （全平台默认推荐 93，但画质仍会有差距 `(QSV > NVENC > AMF)` ，可根据个人喜好微调）
 
 ## ⚙️ 系统要求
 
@@ -66,7 +67,7 @@
 *   **显卡**: **必须** 支持 AV1 硬件编码
     *   🟢 **Intel**: Arc A380 / A750 / B580 等独显，或 Core Ultra 系列核显。
     *   🟢 **NVIDIA**: GeForce RTX 40 系列 (如 RTX 4060 / 4080 / 4090)。
-    *   🟢 **AMD**: Radeon RX 7000 系列独显或 RDNA 3 架构核显 (如 Ryzen 8000G)。
+    *   🟢 **AMD**: Radeon RX 7000 系列独显或 RDNA 3 架构核显 (如 Ryzen 8000G)。*(注: 由于需使用 CPU 辅助探测，建议搭配较新 CPU 以获得最佳体验)*
     *   *注意: 旧款 NVIDIA (30系及以下) 及 AMD (RX 6000系及以下) 不支持。*
 *   **驱动**: 请安装最新的显卡驱动。
 
@@ -90,7 +91,7 @@
 ```
 **AMD AMF:**
 ```bash
-.\ffmpeg.exe -f lavfi -i color=black:s=1280x720 -pix_fmt p010le -c:v av1_amf -usage transcoding -quality balanced -rc cqp -qp_i 30 -qp_p 30 -qp_b 30 -frames:v 1 -f null - -v error
+.\ffmpeg.exe -f lavfi -i color=black:s=1280x720 -pix_fmt p010le -c:v av1_amf -usage transcoding -quality balanced -rc vbr_latency -qvbr_quality_level 30 -frames:v 1 -f null - -v error
 ```
 
 *   **无输出**: 恭喜！您的硬件完美支持 QSV, NVENC 或 AMF AV1 硬件编码。
@@ -102,11 +103,17 @@
 
 ## 🚀 更新日志
 
+*   **v1.2.1 (2026-02-17)**
+    *   🛡️ **探测逻辑重构**: 为所有硬件编码器 (QSV/NVENC/AMF) 引入“三级探测策略” (硬件 -> SVT-AV1 -> AOM-AV1)。特别说明：由于 `ab-av1` 原生不支持 AMF，AMD 模式将强制使用 CPU (SVT-AV1 -> AOM-AV1) 进行探测并换算参数。
+    *   🎚️ **全域灵力偏移**: 开放“灵力偏移” (VMAF Offset) 调节功能，支持针对 CPU 探测结果进行微调 (默认: QSV -2 / NVENC -4 / AMF -6)。
+    *   ⚡ **性能监控**: 任务列表新增实时压制速度 (Speed) 和剩余时间预估 (ETA) 显示；任务完成后常驻显示耗时统计。
+    *   🐛 **Bug 修复**: 修复了输入文件包含封面图 (MJPEG) 时导致 `ab-av1` 识别错误并崩溃的问题；修复了极短视频或多音轨视频导致的进度条计算异常；优化了 UI 列表布局。
+
 *   **v1.2.0 (2026-02-16)**
     *   🔴 **新增 AMD AMF AV1 硬件编码支持**: 适配 Radeon RX 7000 系列及 RDNA 3 核显，默认 VMAF 设为 97.0。
     *   🔊 **音频增强**: 智能识别并保留 5.1/7.1 多声道 (Opus Multichannel)，新增响度标准化 (Loudnorm) 智能模式，避免破坏环绕声动态。
     *   ⚡ **核心重构**: 底层框架迁移至 **PySide6**，引入异步任务队列与日志缓冲池，大幅提升大量文件列表下的 UI 响应速度。
-    *   🌈 **画质优化**: 全程强制 10-bit 像素处理，优化 HDR 色彩保留；NVENC/QSV/AMF 均已启用感知增强 (AQ/Lookahead/PreAnalysis)。
+    *   🌈 **画质优化**: 全程强制 10-bit 像素处理 (AMD 为 8-bit)，优化 HDR 色彩保留；NVENC/QSV/AMF 均已启用感知增强 (AQ/Lookahead/PreAnalysis)。
     *   🛠️ **体验升级**: 优化了任务进度条显示，增加剩余时间预估；修复了停止任务时后台进程残留的 Bug。
 
 *   **v1.1.0 (2026-02-13)**
@@ -172,6 +179,9 @@ A: 请检查您的显卡是否支持 AV1 硬件编码。
    - **Intel**: 需要 Arc A380/A750/B580 或 Core Ultra 核显。
    - **NVIDIA**: 需要 RTX 40 系列 (如 4060/4080/4090)。
    - **AMD**: 需要 Radeon RX 7000 系列或 RDNA 3 架构核显。
+
+**Q: 为什么 AMD 模式下显示 "CPU 探测"？**
+A: 由于核心组件 `ab-av1` 目前尚未原生支持 AMD AMF 硬件编码器。为了实现自动码率控制，程序会使用 CPU (SVT-AV1 -> AOM-AV1) 进行“代理探测”，然后通过算法将结果换算为 AMF 所需的参数。虽然探测阶段会占用 CPU，但最终的转码过程依然是纯硬件加速的。
 
 **Q: 转换后的 MKV 字幕显示不正常？**
 A: 程序会自动判断：如果是 MP4 源文件，字幕会转为 SRT 以兼容 MKV；如果是 MKV 源文件，则保留原始字幕（如 ASS 特效）。
