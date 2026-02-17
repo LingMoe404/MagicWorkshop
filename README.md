@@ -15,8 +15,7 @@
 
 ## 📸 界面预览
 
-![软件截图](screenshot1.gif)
-![软件截图](screenshot2.gif)
+![软件截图](screenshot.gif)
 
 ## 🎯 核心功能
 
@@ -230,3 +229,4 @@ A: 程序会自动判断：如果是 MP4 源文件，字幕会转为 SRT 以兼�
 *   **License**: MagicWorkshop by 泠萌404 is licensed under GPL-3.0.
 
 Copyright © 2026 泠萌404
+
