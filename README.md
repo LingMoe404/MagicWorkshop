@@ -157,7 +157,7 @@
 
 3.  **准备工具链**
     请确保项目根目录下的 `tools/` 文件夹内包含以下可执行文件：
-    *   `ffmpeg.exe` & `ffprobe.exe`
+    *   `ffmpeg.exe` & `ffprobe.exe`: **注意**：仓库源码中上传的是 `essentials` 版本，缺少部分编码支持。建议前往 gyan.dev 下载 `ffmpeg-release-full.7z` (Full 版本) 并替换。*(注：下载的正式版 Releases 压缩包已内置 Full 版本，无需额外操作)*
     *   `ab-av1.exe`
 
 4.  **启动**
@@ -172,7 +172,10 @@
 ## 🛠️ 常见问题
 
 **Q: 为什么启动时提示“结界破损警告”？**
-A: 说明程序目录下缺少 `ffmpeg.exe`、`ffprobe.exe` 或 `ab-av1.exe`。请下载这些工具并和 exe 放在一起。
+A: 说明程序目录下的 `tools/` 文件夹内缺少 `ffmpeg.exe`、`ffprobe.exe` 或 `ab-av1.exe`。请确保这些工具存在于 `tools/` 目录中。
+
+**Q: 为什么部分视频转码失败？**
+A: 源码仓库中有单文件体积限制，上传的 `ffmpeg.exe` 为 `essentials` 版本，可能缺少部分非主流编码格式的支持。建议前往 gyan.dev 下载 `ffmpeg-release-full.7z` (Full 版本) 并替换 `tools/` 目录下的文件。*(注：Releases 发布页下载的正式版已内置 Full 版本)*
 
 **Q: 为什么点击开始后直接报错/闪退？**
 A: 请检查您的显卡是否支持 AV1 硬件编码。
